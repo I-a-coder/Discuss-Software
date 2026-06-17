@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #5d3a8c;
+  --color-brand-light: #7b5aa8;
+  --color-brand-dark: #4a2e70;
+  --color-brand-muted: #f3eef8;
+  --font-serif: "Libre Baskerville", Georgia, serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background: #ffffff;
+    color: #212529;
+  }
+  h1, h2, h3.brand-heading {
+    font-family: var(--font-serif);
+    font-weight: 700;
+  }
+}
+
+@layer utilities {
+  .card {
+    @apply rounded-2xl border border-gray-200 bg-white shadow-sm;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-[#5D3A8C] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#4A2E70] disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-[#5D3A8C] bg-white px-5 py-2.5 text-sm font-medium text-[#5D3A8C] transition hover:bg-[#F3EEF8] disabled:opacity-50;
+  }
+  .input-field {
+    @apply w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-[#5D3A8C] focus:ring-2 focus:ring-[#5D3A8C]/20;
+  }
+  .sticky-note {
+    @apply rounded-xl border-l-4 p-4 shadow-md transition hover:shadow-lg;
+  }
+  .meeting-reaction-float {
+    animation: reaction-float 2.4s ease-out forwards;
+    pointer-events: none;
+  }
+  .minutes-export-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-[#5D3A8C] bg-white px-3 py-2 text-xs font-medium text-[#5D3A8C] transition-colors duration-150 hover:bg-[#5D3A8C] hover:text-white hover:border-[#5D3A8C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5D3A8C]/40;
+  }
+  .cursor-wb-pen {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%235D3A8C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z'/%3E%3C/svg%3E") 2 22, crosshair;
+  }
+  .cursor-wb-eraser {
+    cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpath d='M7 21h10'/%3E%3Cpath d='m5 15 9-9 5 5-9 9z'/%3E%3C/svg%3E") 8 18, cell;
+  }
+  .ai-fab-ring {
+    border: 2px solid rgba(93, 58, 140, 0.45);
+    animation: ai-fab-pulse 2.4s ease-out infinite;
+  }
+  .ai-fab-ring-delay {
+    animation-delay: 1.2s;
+  }
+}
+
+@keyframes reaction-float {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  70% {
+    opacity: 0.85;
+    transform: translateY(-120px) scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-160px) scale(0.9);
+  }
+}
+
+@keyframes ai-fab-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.75);
+    opacity: 0;
+  }
+}
+
+.ai-chat-widget-panel {
+  animation: ai-panel-in 0.22s ease-out;
+}
+
+@keyframes ai-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.save-note-modal {
+  animation: save-note-pop 0.28s ease-out;
+}
+
+@keyframes save-note-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}

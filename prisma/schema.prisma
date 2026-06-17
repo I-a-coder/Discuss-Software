@@ -1,0 +1,284 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  GUEST
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  REVIEW
+  DONE
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  passwordHash  String?
+  image         String?
+  role          Role      @default(MEMBER)
+  organizationId String?
+  organization  Organization? @relation(fields: [organizationId], references: [id])
+  createdAt     DateTime  @default(now())
+  discussions   DiscussionMessage[]
+  chatMessages  ChatMessage[]
+  personalNotes PersonalNote[]
+  activities    ActivityLog[]
+  assignedTasks Task[]    @relation("TaskAssignee")
+  createdTasks  Task[]    @relation("TaskCreator")
+  meetingNotes  MeetingNote[]
+  calendarEvents CalendarEvent[]
+  concernReports ConcernReport[]
+  meetingReviews MeetingReview[]
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  users     User[]
+  tasks     Task[]
+  activities ActivityLog[]
+  communities Community[]
+  calendarEvents CalendarEvent[]
+  concernReports ConcernReport[]
+}
+
+model DiscussionMessage {
+  id        String   @id @default(cuid())
+  content   String
+  encrypted Boolean  @default(true)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  channel   String   @default("general")
+  createdAt DateTime @default(now())
+}
+
+model Community {
+  id             String   @id @default(cuid())
+  name           String
+  description    String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  channels       Channel[]
+  createdAt      DateTime @default(now())
+}
+
+model Channel {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String
+  mode        String    @default("open")
+  ownerId     String?
+  adminIds    String?
+  communityId String
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  thread      ChatThread?
+  createdAt   DateTime  @default(now())
+
+  @@unique([communityId, slug])
+}
+
+model ChatReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId, emoji])
+}
+
+model ChatThread {
+  id        String   @id @default(cuid())
+  type      String
+  channelId String?  @unique
+  channel   Channel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  dmUserAId String?
+  dmUserBId String?
+  name      String?
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  messages  ChatMessage[]
+
+  @@unique([dmUserAId, dmUserBId])
+}
+
+model ChatMessage {
+  id             String   @id @default(cuid())
+  threadId       String
+  thread         ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User     @relation(fields: [authorId], references: [id])
+  content        String
+  attachmentPath String?
+  attachmentName String?
+  attachmentMime String?
+  encrypted      Boolean  @default(true)
+  createdAt      DateTime @default(now())
+}
+
+model CalendarEvent {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  title          String
+  eventDate      DateTime
+  stickyNote     String?
+  color          String   @default("#FEF3C7")
+  remindAt       DateTime?
+  reminded       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+}
+
+model ConcernReport {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  category       String
+  subject        String
+  description    String
+  status         String   @default("open")
+  createdAt      DateTime @default(now())
+}
+
+model MeetingReview {
+  id        String   @id @default(cuid())
+  meetingId String
+  meeting   Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  stars     Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  @@unique([meetingId, userId])
+}
+
+model Task {
+  id             String     @id @default(cuid())
+  title          String
+  description    String?
+  status         TaskStatus @default(TODO)
+  color          String     @default("#FEF3C7")
+  dueAt          DateTime?
+  assigneeId     String?
+  assignee       User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  creatorId      String
+  creator        User       @relation("TaskCreator", fields: [creatorId], references: [id])
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  comments       TaskComment[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+}
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  content   String
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorName String
+  createdAt DateTime @default(now())
+}
+
+model PersonalNote {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  encrypted Boolean  @default(true)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+model Meeting {
+  id             String    @id @default(cuid())
+  roomCode       String    @unique
+  title          String
+  status         String    @default("live")
+  meetingLink    String
+  hostId         String
+  organizationId String?
+  transcript     String?
+  recordingMeta  String?
+  whiteboardData String?
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+  createdAt      DateTime  @default(now())
+  notes          MeetingNote[]
+  reviews        MeetingReview[]
+}
+
+model MeetingNote {
+  id         String   @id @default(cuid())
+  title      String
+  content    String
+  summary    String?
+  meetingLink String?
+  transcript String?
+  meetingId  String?
+  meeting    Meeting? @relation(fields: [meetingId], references: [id])
+  encrypted  Boolean  @default(true)
+  authorId   String
+  author     User     @relation(fields: [authorId], references: [id])
+  createdAt  DateTime @default(now())
+}
+
+model WhiteboardSnapshot {
+  id        String   @id @default(cuid())
+  name      String
+  data      String
+  authorId  String
+  createdAt DateTime @default(now())
+}
+
+model ActivityLog {
+  id             String   @id @default(cuid())
+  action         String
+  details        String?
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id])
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  createdAt      DateTime @default(now())
+}
+
+model AiChatMessage {
+  id        String   @id @default(cuid())
+  role      String
+  content   String
+  userId    String
+  createdAt DateTime @default(now())
+}
+
+model ScheduledMeeting {
+  id                String   @id @default(cuid())
+  title             String
+  roomCode          String   @unique
+  meetingLink       String
+  scheduledAt       DateTime
+  hostId            String
+  organizationId    String?
+  attendeeUserIds   String   @default("[]")
+  attendeeEmails    String   @default("[]")
+  notificationSent  Boolean  @default(false)
+  createdAt         DateTime @default(now())
+}
