@@ -6,6 +6,8 @@ import {
   pruneStale,
 } from "@/lib/presence-store";
 
+export const dynamic = "force-dynamic";
+
 export async function POST() {
   const { session, error } = await requireSession();
   if (error) return error;

@@ -17,10 +17,17 @@ export function useOnlineStatus(userIds: string[]) {
 
   const refresh = useCallback(async () => {
     if (!key) return;
-    const res = await fetch(`/api/presence?ids=${encodeURIComponent(key)}`);
-    if (res.ok) {
-      const data = await res.json();
-      setOnline(new Set(data.online || []));
+    try {
+      const res = await fetch(`/api/presence?ids=${encodeURIComponent(key)}`);
+      if (res.ok) {
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json();
+          setOnline(new Set(data.online || []));
+        }
+      }
+    } catch (e) {
+      console.warn("[usePresence] failed to fetch presence status:", e);
     }
   }, [key]);
 

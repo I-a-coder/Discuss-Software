@@ -90,15 +90,15 @@ export async function POST(req: Request) {
     });
 
     // 3. Save the new translations to the database permanently
-    await Promise.all(
-      toTranslate.map((text, i) => 
-        prisma.translationCache.upsert({
-          where: { lang_key: { lang, key: text } },
-          create: { lang, key: text, value: newTranslations[i] },
-          update: { value: newTranslations[i] }
-        })
-      )
-    );
+    for (let i = 0; i < toTranslate.length; i++) {
+      const text = toTranslate[i];
+      await prisma.translationCache.upsert({
+        where: { lang_key: { lang, key: text } },
+        create: { lang, key: text, value: newTranslations[i] },
+        update: { value: newTranslations[i] }
+      });
+    }
+
 
     // 4. Merge old and new for the response
     texts.forEach(text => {

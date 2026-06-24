@@ -98,9 +98,18 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     // Fetch the global database cache for this language
     if (lang !== "en") {
       fetch(`/api/translate/cache?lang=${lang}`)
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) {
+            throw new Error(`HTTP error! status: ${res.status}`);
+          }
+          const contentType = res.headers.get("content-type");
+          if (!contentType || !contentType.includes("application/json")) {
+            throw new TypeError("Response is not JSON");
+          }
+          return res.json();
+        })
         .then(data => {
-          if (data.cache) {
+          if (data && data.cache) {
             setDynCache(prev => {
               const merged = { ...prev, ...data.cache };
               saveCache(lang, merged);
@@ -108,7 +117,9 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
             });
           }
         })
-        .catch(console.error);
+        .catch(err => {
+          console.warn("[LanguageContext] Could not load global translation cache:", err.message);
+        });
     }
   }, [lang]);
 
@@ -131,6 +142,11 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ lang: currentLang, texts }),
       });
       if (!res.ok) return;
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        console.warn("[LanguageContext] /api/translate response is not JSON");
+        return;
+      }
       const { translations } = await res.json() as { translations: string[] };
       setDynCache((prev) => {
         const updated = { ...prev };
@@ -142,8 +158,8 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         saveCache(currentLang, updated);
         return updated;
       });
-    } catch {
-      /* network error – skip */
+    } catch (e) {
+      console.warn("[LanguageContext] flushPending error:", e);
     } finally {
       translatingRef.current = false;
     }

@@ -266,8 +266,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const poll = useCallback(async () => {
     if (!session?.user?.id) return;
     try {
-      const res = await fetch("/api/calls");
+      const res = await fetch("/api/calls", { cache: "no-store" });
       if (!res.ok) return;
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        return;
+      }
       const data = await res.json();
       const ic: CallInvitation | null = data.incoming ?? null;
       const og: CallInvitation | null = data.outgoing ?? null;
@@ -357,21 +361,30 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const ringUser = useCallback(
     async (targetId: string, type: CallType, title?: string) => {
-      const res = await fetch("/api/calls", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetId, type, title }),
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      if (data.call) {
-        setOutgoing(data.call);
-        prevStatus.current = "ringing";
-        ringStartRef.current = Date.now();
-        setCountdown(RING_TIMEOUT_MS / 1000);
+      try {
+        const res = await fetch("/api/calls", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetId, type, title }),
+        });
+        if (!res.ok) return null;
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          return null;
+        }
+        const data = await res.json();
+        if (data.call) {
+          setOutgoing(data.call);
+          prevStatus.current = "ringing";
+          ringStartRef.current = Date.now();
+          setCountdown(RING_TIMEOUT_MS / 1000);
+        }
+        // Caller does NOT auto-navigate to room — waits for receiver to accept
+        return data;
+      } catch (e) {
+        console.error("[CallContext] ringUser error:", e);
+        return null;
       }
-      // Caller does NOT auto-navigate to room — waits for receiver to accept
-      return data;
     },
     []
   );
@@ -383,27 +396,36 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       meetingLink: string;
       title: string;
     }) => {
-      const res = await fetch("/api/calls", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          participantIds: opts.participantIds,
-          roomCode: opts.roomCode,
-          meetingLink: opts.meetingLink,
-          title: opts.title,
-          type: "meet",
-        }),
-      });
-      if (!res.ok) return null;
-      const data = await res.json();
-      if (data.call) {
-        setOutgoing(data.call);
-        prevStatus.current = "ringing";
-        ringStartRef.current = Date.now();
-        setCountdown(RING_TIMEOUT_MS / 1000);
+      try {
+        const res = await fetch("/api/calls", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            participantIds: opts.participantIds,
+            roomCode: opts.roomCode,
+            meetingLink: opts.meetingLink,
+            title: opts.title,
+            type: "meet",
+          }),
+        });
+        if (!res.ok) return null;
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          return null;
+        }
+        const data = await res.json();
+        if (data.call) {
+          setOutgoing(data.call);
+          prevStatus.current = "ringing";
+          ringStartRef.current = Date.now();
+          setCountdown(RING_TIMEOUT_MS / 1000);
+        }
+        // Caller waits in overlay — enters room only when a participant accepts
+        return data;
+      } catch (e) {
+        console.error("[CallContext] ringMeeting error:", e);
+        return null;
       }
-      // Caller waits in overlay — enters room only when a participant accepts
-      return data;
     },
     []
   );

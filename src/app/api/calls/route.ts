@@ -22,9 +22,12 @@ export async function GET() {
   const { session, error } = await requireSession();
   if (error) return error;
   const uid = session!.user.id;
+  const inc = getIncomingCall(uid);
+  const out = getOutgoingCall(uid);
+  console.log(`[GET /api/calls] User ${uid} | incoming: ${inc?.id} | outgoing: ${out?.id}`);
   return NextResponse.json({
-    incoming: getIncomingCall(uid),
-    outgoing: getOutgoingCall(uid),
+    incoming: inc,
+    outgoing: out,
   });
 }
 
@@ -70,6 +73,7 @@ export async function POST(req: Request) {
       roomCode: existingCode,
       meetingLink: existingLink,
     });
+    console.log(`[POST /api/calls] Meeting created by ${callerId} for targets:`, participantIds);
     return NextResponse.json({ call, roomCode: existingCode, meetingLink: existingLink });
   }
 
@@ -125,6 +129,7 @@ export async function POST(req: Request) {
     meetingLink,
   });
 
+  console.log(`[POST /api/calls] 1:1 call created by ${callerId} for target: ${targetId}`);
   return NextResponse.json({ call, roomCode, meetingLink });
 }
 

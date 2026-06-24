@@ -23,8 +23,18 @@ export function useAiChat(voiceEnabled: boolean) {
 
   const reload = useCallback(() => {
     return fetch("/api/ai")
-      .then((r) => r.json())
-      .then(setMessages);
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
+        const contentType = r.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+          throw new TypeError("Response is not JSON");
+        }
+        return r.json();
+      })
+      .then(setMessages)
+      .catch((err) => {
+        console.warn("[useAiChat] Failed to reload messages:", err.message);
+      });
   }, []);
 
   useEffect(() => {
