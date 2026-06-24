@@ -269,9 +269,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch("/api/calls");
       if (!res.ok) return;
       const data = await res.json();
-      setIncoming(data.incoming ?? null);
-
+      const ic: CallInvitation | null = data.incoming ?? null;
       const og: CallInvitation | null = data.outgoing ?? null;
+      setIncoming(ic);
+
+      const isRinging = og?.status === "ringing" || ic?.status === "ringing";
+      isRingingRef.current = isRinging;
 
       // Accepted: navigate caller into room
       if (og?.status === "accepted") {
@@ -313,7 +316,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setOutgoing(og);
         if (!prevStatus.current) {
           ringStartRef.current = Date.now();
-          isRingingRef.current = true;
         }
         prevStatus.current = og.status ?? null;
 
@@ -351,7 +353,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       poll();
     }, isRingingRef.current ? 500 : 2000);
     return () => clearInterval(interval);
-  }, [poll, session?.user?.id, outgoing?.status]);
+  }, [poll, session?.user?.id, outgoing?.status, incoming?.status]);
 
   const ringUser = useCallback(
     async (targetId: string, type: CallType, title?: string) => {

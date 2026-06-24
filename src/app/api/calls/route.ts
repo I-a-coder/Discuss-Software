@@ -16,6 +16,8 @@ import { generateRoomCode, buildMeetingLink } from "@/lib/meeting-utils";
 import { getOrCreateRoom } from "@/lib/meeting-store";
 import { rateLimit } from "@/lib/rate-limit";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const { session, error } = await requireSession();
   if (error) return error;
@@ -148,6 +150,12 @@ export async function PATCH(req: Request) {
 
   if (!callId || !["accepted", "declined"].includes(status)) {
     return NextResponse.json({ error: "Invalid" }, { status: 400 });
+  }
+
+  // Security: verify the responder is the intended target
+  const targetCall = getCallForTarget(session!.user.id);
+  if (!targetCall || targetCall.id !== callId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const ok = respondToCall(callId, status);
