@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import {
   Video,
   VideoOff,
@@ -31,7 +32,7 @@ import {
 } from "lucide-react";
 import { useCall } from "@/contexts/CallContext";
 import { startCallRing } from "@/lib/call-ringtone";
-import { RING_WAIT_MS } from "@/lib/call-store";
+import { RING_TIMEOUT_MS as RING_WAIT_MS } from "@/lib/call-store";
 import { useMeetingWebRTC } from "@/hooks/useMeetingWebRTC";
 import {
   useVirtualBackground,
@@ -108,6 +109,7 @@ export function MeetingRoom({
 }) {
   const { t } = useLanguage();
   const { data: session } = useSession();
+  const router = useRouter();
   const { outgoing, clearOutgoing } = useCall();
   const userId = session?.user?.id || "";
   const [videoOn, setVideoOn] = useState(false);
@@ -370,7 +372,7 @@ export function MeetingRoom({
         });
       } else if (action === "kicked") {
         localStreamRef.current?.getTracks().forEach((tr) => tr.stop());
-        window.location.href = "/dashboard/meetings?removed=1";
+        router.push("/dashboard/meetings?removed=1");
         return;
       }
       await fetch(`/api/meetings/${roomCode}/presence`, {
@@ -390,7 +392,8 @@ export function MeetingRoom({
 
       if (data.meetingEnded) {
         localStreamRef.current?.getTracks().forEach((tr) => tr.stop());
-        // Redirect to review page — use meetingId if available, otherwise fall back
+        clearOutgoing();
+        // Full page navigation — ensures WebRTC resources are fully released
         window.location.href = meetingId
           ? `/dashboard/meetings/review?meetingId=${meetingId}`
           : "/dashboard/meetings?ended=1";
@@ -446,7 +449,7 @@ export function MeetingRoom({
       });
     };
     poll();
-    const id = setInterval(poll, 4000);
+    const id = setInterval(poll, 2000);
     return () => clearInterval(id);
   }, [roomCode, userId, connectToPeer, applyHostCommand]);
 
@@ -752,24 +755,35 @@ export function MeetingRoom({
   }
 
   async function leaveMeeting() {
-    const res = await fetch(`/api/meetings/${roomCode}/presence`, {
+    // Stop all media tracks immediately
+    localStreamRef.current?.getTracks().forEach((tr) => tr.stop());
+    screenStreamRef.current?.getTracks().forEach((tr) => tr.stop());
+    clearOutgoing();
+
+    const isHostLeaving = userId === hostId && coHostIds.size === 0;
+
+    // Fire API calls in background first, then navigate
+    // Using window.location.href (full reload) — required for WebRTC teardown.
+    // router.push keeps component alive during transition causing frozen UI.
+    fetch(`/api/meetings/${roomCode}/presence`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ leave: true }),
-    });
-    await res.json().catch(() => null);
-    localStreamRef.current?.getTracks().forEach((tr) => tr.stop());
-    // Use cached meetingId, or fetch fresh if the state is still empty (race condition)
-    let id = meetingId;
-    if (!id) {
-      try {
-        const r = await fetch(`/api/meetings/${roomCode}`);
-        const d = await r.json();
-        id = d.meeting?.id || "";
-      } catch { /* ignore */ }
+    }).catch(() => {});
+
+    if (isHostLeaving) {
+      fetch(`/api/meetings/${roomCode}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "end" }),
+      }).catch(() => {});
     }
-    window.location.href = id
-      ? `/dashboard/meetings/review?meetingId=${id}`
+
+    // Small tick to let fetch fire before navigation
+    await new Promise((r) => setTimeout(r, 80));
+
+    window.location.href = meetingId
+      ? `/dashboard/meetings/review?meetingId=${meetingId}`
       : "/dashboard/meetings?ended=1";
   }
 
@@ -844,7 +858,7 @@ export function MeetingRoom({
         <div className="shrink-0 flex items-center justify-between gap-3 bg-[#5D3A8C] px-4 py-2 text-white text-sm z-30">
           <span className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
-            {t("room.ringing_participants")} — {t("room.waiting_seconds")} ({ringCountdown}s)
+            {t("room.ringing_participants")}, {t("room.waiting_seconds")} ({ringCountdown}s)
           </span>
           <button
             type="button"

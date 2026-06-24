@@ -43,6 +43,7 @@ export async function POST(req: Request) {
   const pastedTranscript = body.transcript as string | undefined;
   const recordingPath = body.recordingPath as string | undefined;
   const recordingName = body.recordingName as string | undefined;
+  const targetLang = body.targetLang as string | undefined;
 
   let meeting = meetingId
     ? await prisma.meeting.findUnique({ where: { id: meetingId } })
@@ -130,7 +131,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Question required" }, { status: 400 });
     }
     const aiAnswer = await askAboutMeeting(
-      { title, transcript: transcript || undefined, meetingLink },
+      { title, transcript: transcript || undefined, meetingLink, targetLang },
       question.trim()
     );
     const answer =
@@ -143,6 +144,7 @@ export async function POST(req: Request) {
     meetingLink,
     transcript: transcript || undefined,
     recordingName,
+    targetLang,
   });
   const minutes = aiMinutes || generateMeetingMinutes(ctx);
 

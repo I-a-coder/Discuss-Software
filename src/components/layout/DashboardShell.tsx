@@ -10,7 +10,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
     <CallProvider>
       <PresenceHeartbeat />
-      <div className="flex min-h-screen bg-[#F8F9FA]">
+      <div className="flex h-screen overflow-hidden bg-[#F8F9FA]">
         <ReminderNotifier />
         <Sidebar />
         <main className="relative z-0 min-w-0 flex-1 overflow-auto">

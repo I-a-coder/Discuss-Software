@@ -14,6 +14,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { generateRoomCode, buildMeetingLink } from "@/lib/meeting-utils";
 import { getOrCreateRoom } from "@/lib/meeting-store";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function GET() {
   const { session, error } = await requireSession();
@@ -50,11 +51,17 @@ export async function POST(req: Request) {
   const callerId = session!.user.id;
   const callerName = session!.user.name || session!.user.email || "Someone";
 
+  // Rate limit: max 8 outgoing calls per minute
+  const limited = rateLimit(callerId, { max: 8, windowMs: 60_000, label: "calls" });
+  if (limited) return limited;
+
   if (participantIds?.length && existingCode && existingLink) {
-    const callTitle = title || `${callerName}'s Meeting`;
+    const callTitle = title || `Group meeting`;
+    const callerTitle = title || `Group meeting`;
     const call = createMeetingCalls({
       callerId,
       callerName,
+      callerTitle,
       targetIds: participantIds,
       type: "meet",
       title: callTitle,
@@ -70,18 +77,31 @@ export async function POST(req: Request) {
 
   const roomCode = existingCode || generateRoomCode();
   const meetingLink = existingLink || buildMeetingLink(roomCode);
+  let targetName = "Someone";
+  if (targetId) {
+    const targetUser = await prisma.user.findUnique({ where: { id: targetId }, select: { name: true, email: true } });
+    if (targetUser) {
+      targetName = targetUser.name || targetUser.email || "Someone";
+    }
+  }
+
+  // Caller sees: "Calling [target name]" — receiver sees: "[Caller name] is calling you"
   const callType: CallType = type === "audio" ? "audio" : "meet";
-  const callTitle =
+  const callerTitle =
     title ||
     (callType === "audio"
-      ? `${callerName}'s Phone Call`
-      : `${callerName}'s Meeting`);
+      ? `Calling ${targetName}`
+      : `Meeting with ${targetName}`);
+  const receiverTitle =
+    callType === "audio"
+      ? `${callerName} is calling you`
+      : `${callerName} invited you to a meeting`;
 
   if (!existingCode) {
     await prisma.meeting.create({
       data: {
         roomCode,
-        title: callTitle,
+        title: callerTitle,
         meetingLink,
         hostId: callerId,
         organizationId: session!.user.organizationId,
@@ -95,9 +115,10 @@ export async function POST(req: Request) {
   const call = createCall({
     callerId,
     callerName,
+    callerTitle,
     targetId,
     type: callType,
-    title: callTitle,
+    title: receiverTitle,
     roomCode,
     meetingLink,
   });

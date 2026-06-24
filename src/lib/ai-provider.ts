@@ -111,6 +111,7 @@ export async function generateAiMeetingMinutes(ctx: {
   transcript?: string;
   recordingName?: string;
   recordingNote?: string;
+  targetLang?: string;
 }): Promise<string | null> {
   const parts = [
     `Meeting title: ${ctx.title}`,
@@ -122,11 +123,15 @@ export async function generateAiMeetingMinutes(ctx: {
     .filter(Boolean)
     .join("\n");
 
+  const langInstruction = ctx.targetLang && ctx.targetLang !== "en"
+    ? ` MUST write the output entirely in ${ctx.targetLang} language.`
+    : "";
+
   return chatCompletion([
     {
       role: "system",
       content:
-        "You generate professional meeting minutes in markdown. Include: # title, ## Executive summary, ## Key decisions, ## Action items (with owners if known), ## Discussion highlights, ## Next steps. Be specific when transcript data exists; otherwise note what is missing.",
+        `You generate professional meeting minutes in markdown. Include: # title, ## Executive summary, ## Key decisions, ## Action items (with owners if known), ## Discussion highlights, ## Next steps. Be specific when transcript data exists; otherwise note what is missing.${langInstruction}`,
     },
     {
       role: "user",
@@ -136,14 +141,17 @@ export async function generateAiMeetingMinutes(ctx: {
 }
 
 export async function askAboutMeeting(
-  ctx: { title: string; transcript?: string; meetingLink?: string },
+  ctx: { title: string; transcript?: string; meetingLink?: string; targetLang?: string },
   question: string
 ): Promise<string | null> {
+  const langInstruction = ctx.targetLang && ctx.targetLang !== "en"
+    ? ` Respond entirely in ${ctx.targetLang} language.`
+    : "";
   return chatCompletion([
     {
       role: "system",
       content:
-        "Answer questions about a meeting using only the provided context. If the answer is not in the context, say so briefly and suggest what to check.",
+        `Answer questions about a meeting using only the provided context. If the answer is not in the context, say so briefly and suggest what to check.${langInstruction}`,
     },
     {
       role: "user",

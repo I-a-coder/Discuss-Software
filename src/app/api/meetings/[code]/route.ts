@@ -93,3 +93,54 @@ export async function PATCH(req: Request, { params }: Params) {
 
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });
 }
+
+export async function DELETE(req: Request, { params }: Params) {
+  const { session, error } = await requireSession();
+  if (error) return error;
+  const { code } = await params;
+
+  try {
+    const meeting = await prisma.meeting.findFirst({
+      where: {
+        OR: [
+          { id: code },
+          { roomCode: code.toUpperCase() },
+        ],
+      },
+    });
+
+    if (!meeting) {
+      return NextResponse.json({ error: "Meeting not found" }, { status: 404 });
+    }
+
+    // Allow host or any owner, admin, or member of the same organization to delete
+    const orgId = session!.user.organizationId;
+    const isHost = meeting.hostId === session!.user.id;
+    const isSameOrg = !!(orgId && meeting.organizationId === orgId);
+    const isAllowedRole = ["OWNER", "ADMIN", "MEMBER"].includes(session!.user.role);
+
+    if (!isAllowedRole || (!isHost && !isSameOrg)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    // Record that this user deleted/hid the meeting from their profile/history
+    await prisma.deletedMeeting.upsert({
+      where: {
+        userId_meetingId: {
+          userId: session!.user.id,
+          meetingId: meeting.id,
+        },
+      },
+      create: {
+        userId: session!.user.id,
+        meetingId: meeting.id,
+      },
+      update: {},
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("Failed to delete meeting:", err);
+    return NextResponse.json({ error: "Failed to delete meeting" }, { status: 500 });
+  }
+}

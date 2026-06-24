@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireSession } from "@/lib/api-auth";
 import { generateRoomCode, buildMeetingLink } from "@/lib/meeting-utils";
+import {
+  getAnyConnection,
+  getCalendarProvider,
+  handleCalendarError,
+} from "@/lib/calendar";
 
 const MAX_DAYS_AHEAD = 7;
 
@@ -9,7 +14,7 @@ export async function GET() {
   const { session, error } = await requireSession();
   if (error) return error;
 
-  const meetings = await (prisma as any).scheduledMeeting.findMany({
+  const meetings = await prisma.scheduledMeeting.findMany({
     where: {
       OR: [
         { hostId: session!.user.id },
@@ -23,7 +28,7 @@ export async function GET() {
 
   // Fetch attendee names for org members
   const enriched = await Promise.all(
-    meetings.map(async (m: any) => {
+    meetings.map(async (m: typeof meetings[number]) => {
       const userIds: string[] = JSON.parse(m.attendeeUserIds || "[]");
       let attendeeNames: { id: string; name: string | null; email: string }[] = [];
       if (userIds.length > 0) {
@@ -69,7 +74,7 @@ export async function POST(req: Request) {
   const roomCode = generateRoomCode();
   const meetingLink = buildMeetingLink(roomCode);
 
-  const meeting = await (prisma as any).scheduledMeeting.create({
+  const meeting = await prisma.scheduledMeeting.create({
     data: {
       title: title || "Scheduled Meeting",
       roomCode,
@@ -133,11 +138,60 @@ export async function POST(req: Request) {
     },
   });
 
+  // ── Calendar sync ──────────────────────────────────────────────────────────
+  // Only the organizer needs a connected calendar. Invitees receive the invite
+  // automatically from the provider (Google / Microsoft sends it to all attendees).
+  let calendarEventCreated = false;
+  const connection = await getAnyConnection(session!.user.id);
+  if (connection) {
+    try {
+      // Resolve email addresses for org-member attendees
+      const memberEmails: string[] = [];
+      if ((attendeeUserIds as string[]).length > 0) {
+        const members = await prisma.user.findMany({
+          where: { id: { in: attendeeUserIds as string[] } },
+          select: { email: true },
+        });
+        memberEmails.push(...members.map((m) => m.email));
+      }
+      const allEmails = [...new Set([...memberEmails, ...(emails as string[])])];
+
+      const organizerEmail = session!.user.email;
+      const endAt = new Date(scheduled.getTime() + 60 * 60 * 1000); // +1 hour default
+
+      const provider = getCalendarProvider(connection);
+      const externalEventId = await provider.createEvent({
+        title: title || "Scheduled Meeting",
+        description: `Yusi Discuss scheduled meeting\nRoom code: ${roomCode}`,
+        startAt: scheduled,
+        endAt,
+        joinUrl: meetingLink,
+        attendeeEmails: allEmails,
+        organizerEmail,
+      });
+
+      await prisma.calendarEventSync.create({
+        data: {
+          scheduledMeetingId: meeting.id,
+          provider: connection.provider,
+          externalEventId,
+          organizerUserId: session!.user.id,
+        },
+      });
+      calendarEventCreated = true;
+    } catch (err) {
+      await handleCalendarError(err, session!.user.id, connection.provider);
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   return NextResponse.json({
     ...meeting,
     attendeeUserIds: attendeeUserIds,
     attendeeEmails: attendeeEmails,
     dmsSent: attendeeUserIds.length,
     emailsQueued: emails.length,
+    calendarEventCreated,
+    calendarProvider: calendarEventCreated ? connection?.provider ?? null : null,
   });
 }

@@ -34,13 +34,16 @@ function Avatar({
   size?: "sm" | "md";
 }) {
   const dim = size === "sm" ? "h-7 w-7 text-[10px]" : "h-9 w-9 text-xs";
-  if (account.image) {
+  const [imgError, setImgError] = useState(false);
+
+  if (account.image && !imgError) {
     return (
       <span className={`${dim} overflow-hidden rounded-full shrink-0`}>
         <img
           src={account.image}
           alt={account.name}
-          className="h-full w-full object-cover"
+          className="h-full w-full object-cover object-center"
+          onError={() => setImgError(true)}
         />
       </span>
     );

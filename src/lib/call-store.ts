@@ -9,8 +9,11 @@ export type CallInvitation = {
   id: string;
   callerId: string;
   callerName: string;
+  /** For the caller's overlay: "Calling [target name]" */
+  callerTitle: string;
   targetId: string;
   type: CallType;
+  /** For the receiver's overlay: "[Caller] is calling you" */
   title: string;
   roomCode: string;
   meetingLink: string;
@@ -22,7 +25,10 @@ export type CallInvitation = {
 const store = new Map<string, CallInvitation>();
 const callerStore = new Map<string, CallInvitation>();
 
-const EXPIRY_MS = 300_000; // 5 minutes — meet rings until join/decline
+/** 1:1 and group rings expire after 15 seconds with no answer. */
+export const RING_TIMEOUT_MS = 15_000;
+/** General data expiry (5 min) — keeps accepted/declined state readable */
+const EXPIRY_MS = 300_000;
 
 function pruneExpired() {
   const now = Date.now();
@@ -34,10 +40,39 @@ function pruneExpired() {
   }
 }
 
+/** Mark any still-ringing calls as missed once 15s elapses. */
+function applyRingTimeout() {
+  const now = Date.now();
+  for (const [targetId, call] of store.entries()) {
+    if (call.status === "ringing" && now - call.createdAt > RING_TIMEOUT_MS) {
+      store.delete(targetId);
+    }
+  }
+  for (const [callerId, call] of callerStore.entries()) {
+    if (call.status === "ringing" && now - call.createdAt > RING_TIMEOUT_MS) {
+      call.status = "missed";
+    }
+  }
+}
+
+/** Returns the incoming call for a specific target user if it exists. Used to verify responder identity. */
+export function getCallForTarget(userId: string): CallInvitation | null {
+  pruneExpired();
+  applyRingTimeout();
+  return store.get(userId) ?? null;
+}
+
+/** Self-prune every 60 seconds so expired entries are cleaned even without API traffic. */
+setInterval(() => {
+  pruneExpired();
+  applyRingTimeout();
+}, 60_000);
+
 export function createCall(
   invitation: Omit<CallInvitation, "id" | "status" | "createdAt">
 ): CallInvitation {
   pruneExpired();
+  applyRingTimeout();
   const call: CallInvitation = {
     ...invitation,
     id: Math.random().toString(36).slice(2),
@@ -51,11 +86,13 @@ export function createCall(
 
 export function getIncomingCall(userId: string): CallInvitation | null {
   pruneExpired();
+  applyRingTimeout();
   return store.get(userId) ?? null;
 }
 
 export function getOutgoingCall(callerId: string): CallInvitation | null {
   pruneExpired();
+  applyRingTimeout();
   return callerStore.get(callerId) ?? null;
 }
 
@@ -112,8 +149,6 @@ export function dismissForUser(userId: string): void {
   dismissOutgoingForUser(userId);
 }
 
-export const RING_WAIT_MS = 30_000;
-
 /** Clear all rings tied to a room once the meeting is live with participants. */
 export function clearCallsForRoom(roomCode: string): void {
   const code = roomCode.toUpperCase();
@@ -133,9 +168,12 @@ export function createMeetingCalls(
   }
 ): CallInvitation {
   pruneExpired();
+  applyRingTimeout();
   const callId = Math.random().toString(36).slice(2);
   const createdAt = Date.now();
   const { targetIds, ...rest } = invitation;
+
+  const participantCount = targetIds.filter((id) => id !== invitation.callerId).length;
 
   const callerView: CallInvitation = {
     ...rest,
@@ -143,7 +181,7 @@ export function createMeetingCalls(
     id: callId,
     status: "ringing",
     createdAt,
-    participantCount: targetIds.filter((id) => id !== invitation.callerId).length,
+    participantCount,
   };
 
   for (const targetId of targetIds) {
@@ -163,9 +201,10 @@ export function createMeetingCalls(
 
 /** Ring additional members into an already-live meeting. */
 export function ringIntoMeeting(
-  invitation: Omit<CallInvitation, "id" | "status" | "createdAt" | "targetId" | "callerId" | "callerName"> & {
+  invitation: Omit<CallInvitation, "id" | "status" | "createdAt" | "targetId" | "callerId" | "callerName" | "callerTitle"> & {
     callerId: string;
     callerName: string;
+    callerTitle: string;
     targetIds: string[];
   }
 ): void {
@@ -180,6 +219,7 @@ export function ringIntoMeeting(
       ...rest,
       callerId: invitation.callerId,
       callerName: invitation.callerName,
+      callerTitle: invitation.callerTitle,
       targetId,
       id: callId,
       status: "ringing",

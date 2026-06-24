@@ -263,7 +263,7 @@ export function NetworkChat() {
       if (res.ok) {
         setAddMemberResult({
           ok: true,
-          msg: `${t("meeting.invite_sent")} — ${data.invitedUser?.name || addMemberEmail}`,
+          msg: `${t("meeting.invite_sent")} to ${data.invitedUser?.name || addMemberEmail}`,
         });
         setAddMemberEmail("");
       } else {
@@ -279,10 +279,10 @@ export function NetworkChat() {
     if (!activeThread?.otherUser?.id) return;
     setCalling(true);
     try {
+      // Caller overlay shows "Calling [name]", receiver sees "[name] is calling you"
       await ringUser(
         activeThread.otherUser.id,
-        "audio",
-        `${session?.user?.name || t("general.system")} ${t("discussion.calling_you")}`
+        "audio"
       );
     } finally {
       setCalling(false);
@@ -592,15 +592,26 @@ export function NetworkChat() {
                       </button>
                     </>
                   ) : (
-                    /* Channel: group Meet button only */
-                    <button
-                      onClick={() => setShowMeetingConfirm(true)}
-                      className="flex items-center gap-1.5 rounded-xl border border-[#5D3A8C]/30 bg-[#F3EEF8] px-3 py-1.5 text-xs font-medium text-[#5D3A8C] hover:bg-[#5D3A8C] hover:text-white transition-all"
-                      title={t("meetings.start_meeting")}
-                    >
-                      <Video className="h-3.5 w-3.5" />
-                      {t("discussion.meet")}
-                    </button>
+                    /* Channel / community: group audio call + Meet buttons */
+                    <>
+                      <button
+                        onClick={startMeetingFromChat}
+                        disabled={startingMeeting}
+                        title={t("discussion.call")}
+                        className="group flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-gray-500 hover:border-[#5D3A8C]/40 hover:text-[#5D3A8C] hover:bg-[#F3EEF8] transition-all disabled:opacity-40"
+                      >
+                        <Phone className="h-4 w-4" />
+                        <span className="text-xs font-medium">{t("discussion.call")}</span>
+                      </button>
+                      <button
+                        onClick={() => setShowMeetingConfirm(true)}
+                        className="flex items-center gap-1.5 rounded-xl border border-[#5D3A8C]/30 bg-[#F3EEF8] px-3 py-1.5 text-xs font-medium text-[#5D3A8C] hover:bg-[#5D3A8C] hover:text-white transition-all"
+                        title={t("meetings.start_meeting")}
+                      >
+                        <Video className="h-3.5 w-3.5" />
+                        {t("discussion.meet")}
+                      </button>
+                    </>
                   )}
                   <MessageSquarePlus className="h-5 w-5 text-gray-300 ml-1" />
                 </div>

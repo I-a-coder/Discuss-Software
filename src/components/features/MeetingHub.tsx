@@ -7,7 +7,7 @@ import Link from "next/link";
 import {
   Plus, Sparkles, Video, Link2, Upload, MessageCircleQuestion,
   Copy, ExternalLink, Users, CalendarClock, Trash2, Mail, UserPlus,
-  Clock, Check,
+  Clock, Check, Calendar,
 } from "lucide-react";
 import { PageHeader } from "./PageHeader";
 import { EmojiPicker, insertEmojiAtCursor } from "@/components/ui/EmojiPicker";
@@ -56,7 +56,7 @@ type ScheduledMeeting = {
 };
 
 function MeetingHubInner() {
-  const { t } = useLanguage();
+  const { t, td, lang } = useLanguage();
   const searchParams = useSearchParams();
   const router = useRouter();
   const [tab, setTab] = useState<"meetings" | "ai" | "notes" | "schedule">("meetings");
@@ -65,6 +65,8 @@ function MeetingHubInner() {
   const [joinCode, setJoinCode] = useState("");
   const [newTitle, setNewTitle] = useState("");
   const [creating, setCreating] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // AI tab state
   const [aiLink, setAiLink] = useState("");
@@ -98,7 +100,9 @@ function MeetingHubInner() {
   const [schedUserSearch, setSchedUserSearch] = useState("");
   const [schedCreating, setSchedCreating] = useState(false);
   const [schedSuccess, setSchedSuccess] = useState<string | null>(null);
+  const [schedCalendarInfo, setSchedCalendarInfo] = useState<{ created: boolean; provider: string | null } | null>(null);
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
+  const [hasCalendar, setHasCalendar] = useState<boolean | null>(null);
 
   const ended = searchParams.get("ended");
   const linkFromUrl = searchParams.get("link");
@@ -164,6 +168,20 @@ function MeetingHubInner() {
     }
   }, [tab]);
 
+  // Check if this user has a calendar connected (once)
+  useEffect(() => {
+    fetch("/api/calendar-sync/status")
+      .then((r) => r.json())
+      .then((d) => {
+        const { google, microsoft } = d.connections;
+        setHasCalendar(
+          (google.connected && google.tokenStatus === "ok") ||
+          (microsoft.connected && microsoft.tokenStatus === "ok")
+        );
+      })
+      .catch(() => setHasCalendar(false));
+  }, []);
+
   async function startMeeting() {
     setCreating(true);
     const res = await fetch("/api/meetings", {
@@ -190,10 +208,12 @@ function MeetingHubInner() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        action: "minutes", meetingLink: aiLink || undefined,
+        action: "minutes",
+        meetingLink: aiLink || undefined,
         transcript: aiTranscript || undefined,
         recordingPath: recordingUpload?.path,
         recordingName: recordingUpload?.name || recordingFile?.name,
+        targetLang: lang,
       }),
     });
     setAiLoading(false);
@@ -236,6 +256,24 @@ function MeetingHubInner() {
         }
       }
       loadNotes();
+    }
+  }
+
+  async function deleteRecentMeeting(id: string) {
+    if (deletingId !== id) {
+      setDeletingId(id);
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = setTimeout(() => setDeletingId(null), 3000);
+      return;
+    }
+    if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    setDeletingId(null);
+
+    const res = await fetch(`/api/meetings/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      setMeetings((prev) => prev.filter((m) => m.id !== id));
+    } else {
+      alert(td("Failed to delete meeting."));
     }
   }
 
@@ -310,6 +348,7 @@ function MeetingHubInner() {
     if (!schedDate || !schedTime) return;
     setSchedCreating(true);
     setSchedSuccess(null);
+    setSchedCalendarInfo(null);
     const scheduledAt = new Date(`${schedDate}T${schedTime}`).toISOString();
     const emailList = schedEmails.split(",").map((e) => e.trim()).filter(Boolean);
     const res = await fetch("/api/meetings/scheduled", {
@@ -325,6 +364,10 @@ function MeetingHubInner() {
     setSchedCreating(false);
     if (res.ok) {
       const data = await res.json();
+      setSchedCalendarInfo({
+        created:  !!data.calendarEventCreated,
+        provider: data.calendarProvider ?? null,
+      });
       setSchedSuccess(
         `Meeting scheduled! ${data.dmsSent} DM${data.dmsSent !== 1 ? "s" : ""} sent` +
         (data.emailsQueued > 0 ? `, ${data.emailsQueued} external email${data.emailsQueued !== 1 ? "s" : ""} queued.` : ".")
@@ -354,7 +397,7 @@ function MeetingHubInner() {
     { id: "meetings" as const, label: t("meetings.tab_join") },
     { id: "ai" as const, label: t("meetings.tab_ai") },
     { id: "notes" as const, label: t("meetings.tab_notes") },
-    { id: "schedule" as const, label: "Schedule" },
+    { id: "schedule" as const, label: t("meetings.schedule" as any) },
   ];
 
   return (
@@ -418,13 +461,26 @@ function MeetingHubInner() {
                       <p className="font-medium">{m.title}</p>
                       <p className="text-xs text-gray-500">{m.status} · {new Date(m.startedAt).toLocaleString()}</p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 items-center">
                       <button type="button" className="btn-secondary text-xs py-1.5" onClick={() => navigator.clipboard.writeText(m.meetingLink)}>
                         <Copy className="h-3 w-3" /> {t("meetings.link")}
                       </button>
                       <Link href={`/dashboard/meetings/room/${m.roomCode}`} className="btn-primary text-xs py-1.5">
                         <ExternalLink className="h-3 w-3" /> {t("meetings.open")}
                       </Link>
+                      <button
+                        type="button"
+                        className={`p-1.5 rounded transition flex items-center gap-1 ${
+                          deletingId === m.id
+                            ? "text-red-600 hover:bg-red-50 font-medium text-xs px-2"
+                            : "text-gray-400 hover:text-red-500 hover:bg-red-50"
+                        }`}
+                        title={deletingId === m.id ? td("Click again to confirm delete") : td("Delete meeting history")}
+                        onClick={() => deleteRecentMeeting(m.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        {deletingId === m.id && <span>{td("Confirm?")}</span>}
+                      </button>
                     </div>
                   </li>
                 ))}
@@ -468,15 +524,15 @@ function MeetingHubInner() {
             {/* Participants for the minutes */}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1 flex items-center gap-1.5">
-                <Users className="h-3.5 w-3.5 text-[#5D3A8C]" /> Attendees (shown under Executive Summary)
+                <Users className="h-3.5 w-3.5 text-[#5D3A8C]" /> {td("Attendees (shown under Executive Summary)")}
               </label>
               <input
                 className="input-field"
-                placeholder="e.g. Alice, Bob, Charlie (comma-separated)"
+                placeholder={td("e.g. Alice, Bob, Charlie (comma-separated)")}
                 value={aiParticipantsInput}
                 onChange={(e) => setAiParticipantsInput(e.target.value)}
               />
-              <p className="mt-1 text-xs text-gray-400">Leave blank to auto-detect from transcript.</p>
+              <p className="mt-1 text-xs text-gray-400">{td("Leave blank to auto-detect from transcript.")}</p>
             </div>
             <button onClick={generateMinutes} disabled={aiLoading || uploadingRecording || (!aiLink && !aiTranscript && !recordingUpload)} className="btn-primary">
               <Sparkles className="h-4 w-4" />
@@ -508,9 +564,9 @@ function MeetingHubInner() {
               <input className="input-field" placeholder={t("meetings.meeting_title_placeholder")} value={title} onChange={(e) => setTitle(e.target.value)} />
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1 flex items-center gap-1.5">
-                  <Users className="h-3.5 w-3.5 text-[#5D3A8C]" /> Attendees / Team Members
+                  <Users className="h-3.5 w-3.5 text-[#5D3A8C]" /> {td("Attendees / Team Members")}
                 </label>
-                <input className="input-field" placeholder="e.g. Alice, Bob, Charlie (comma-separated)" value={noteParticipants} onChange={(e) => setNoteParticipants(e.target.value)} />
+                <input className="input-field" placeholder={td("e.g. Alice, Bob, Charlie (comma-separated)")} value={noteParticipants} onChange={(e) => setNoteParticipants(e.target.value)} />
               </div>
               <div className="flex items-center gap-2">
                 <EmojiPicker onInsert={(emoji) => setContent((c) => insertEmojiAtCursor(c, emoji, contentRef.current))} />
@@ -529,7 +585,7 @@ function MeetingHubInner() {
                 <div key={n.id} className="card p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="font-semibold text-gray-900">{n.title}</h3>
+                      <h3 className="font-semibold text-gray-900">{td(n.title)}</h3>
                       <p className="text-xs text-gray-500 mt-1">{n.author.name} · {new Date(n.createdAt).toLocaleString()}</p>
                       {n.meetingLink && <p className="text-xs text-[#5D3A8C] mt-1 truncate max-w-md">{n.meetingLink}</p>}
                     </div>
@@ -537,19 +593,19 @@ function MeetingHubInner() {
                   </div>
                   {n.summary && (
                     <div className="mt-3 rounded-lg bg-[#F3EEF8] p-3 text-sm text-[#5D3A8C]">
-                      <strong>{t("meetings.minutes_title")}:</strong> {n.summary}
+                      <strong>{t("meetings.minutes_title")}:</strong> {td(n.summary)}
                     </div>
                   )}
                   {pList && (
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
                       <Users className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                      <span className="text-xs font-medium text-gray-500">Attendees:</span>
+                      <span className="text-xs font-medium text-gray-500">{t("meetings.attendees_label" as any)}:</span>
                       {pList.split(",").map((p) => p.trim()).filter(Boolean).map((p) => (
                         <span key={p} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700">{p}</span>
                       ))}
                     </div>
                   )}
-                  <p className="mt-3 text-sm text-gray-700 whitespace-pre-wrap max-h-64 overflow-y-auto">{body}</p>
+                  <p className="mt-3 text-sm text-gray-700 whitespace-pre-wrap max-h-64 overflow-y-auto">{td(body)}</p>
                   <button type="button" className="mt-3 text-xs text-[#5D3A8C] underline"
                     onClick={() => { setAiLink(n.meetingLink || ""); setAiTranscript(n.content); setTab("ai"); }}>
                     {t("meetings.tab_ai")} →
@@ -569,25 +625,53 @@ function MeetingHubInner() {
           <div className="card p-6 space-y-5">
             <h3 className="flex items-center gap-2 font-semibold text-gray-900">
               <CalendarClock className="h-5 w-5 text-[#5D3A8C]" />
-              Schedule a Future Meeting
+              {t("meetings.schedule_future" as any)}
             </h3>
-            <p className="text-sm text-gray-500">Create a meeting link up to 7 days ahead. Attendees receive a DM invite; external emails get a notification (requires SMTP config).</p>
+            <p className="text-sm text-gray-500">{t("meetings.schedule_hint" as any)}</p>
 
             {schedSuccess && (
-              <div className="flex items-center gap-2 rounded-xl bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
-                <Check className="h-4 w-4 shrink-0" /> {schedSuccess}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 rounded-xl bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+                  <Check className="h-4 w-4 shrink-0" /> {schedSuccess}
+                </div>
+
+                {/* Calendar sync feedback */}
+                {schedCalendarInfo?.created ? (
+                  <div className="flex items-center gap-2 rounded-xl bg-[#F3EEF8] border border-[#5D3A8C]/20 px-4 py-2.5 text-sm text-[#5D3A8C]">
+                    <Calendar className="h-4 w-4 shrink-0" />
+                    <span>
+                      Calendar event created on{" "}
+                      <strong>{schedCalendarInfo.provider === "google" ? "Google Calendar" : "Microsoft 365"}</strong>
+                      {" "}Attendees will receive a calendar invite.
+                    </span>
+                  </div>
+                ) : hasCalendar === false ? (
+                  <div className="flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2.5 text-sm text-amber-800">
+                    <Calendar className="h-4 w-4 shrink-0" />
+                    <span>
+                      💡 Connect your calendar in{" "}
+                      <a
+                        href="/dashboard/settings?tab=calendar"
+                        className="font-semibold underline hover:no-underline"
+                      >
+                        Settings
+                      </a>
+                      {" "}to automatically send real calendar invites to attendees.
+                    </span>
+                  </div>
+                ) : null}
               </div>
             )}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Meeting Title</label>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{t("meetings.meeting_title_label" as any)}</label>
                 <input className="input-field" placeholder="e.g. Sprint Planning" value={schedTitle} onChange={(e) => setSchedTitle(e.target.value)} />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">
-                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> Date</span>
+                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {t("meetings.date_label" as any)}</span>
                   </label>
                   <input
                     type="date" className="input-field text-sm"
@@ -597,7 +681,7 @@ function MeetingHubInner() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Time</label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{t("meetings.time_label" as any)}</label>
                   <input type="time" className="input-field text-sm" value={schedTime} onChange={(e) => setSchedTime(e.target.value)} />
                 </div>
               </div>
@@ -606,7 +690,7 @@ function MeetingHubInner() {
             {/* Team member attendee selector */}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-2 flex items-center gap-1.5">
-                <UserPlus className="h-3.5 w-3.5 text-[#5D3A8C]" /> Add Team Members
+                <UserPlus className="h-3.5 w-3.5 text-[#5D3A8C]" /> {t("meetings.add_team_members" as any)}
               </label>
               <input
                 className="input-field mb-2 text-sm"
@@ -635,7 +719,7 @@ function MeetingHubInner() {
               </div>
               {schedUserIds.size > 0 && (
                 <p className="mt-1.5 text-xs text-[#5D3A8C] font-medium">
-                  {schedUserIds.size} team member{schedUserIds.size !== 1 ? "s" : ""} selected — will receive DM invite
+                  {schedUserIds.size} {t("meetings.team_members_selected" as any)}
                 </p>
               )}
             </div>
@@ -643,16 +727,16 @@ function MeetingHubInner() {
             {/* External email attendees */}
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1 flex items-center gap-1.5">
-                <Mail className="h-3.5 w-3.5 text-[#5D3A8C]" /> External Attendees (Email)
+                <Mail className="h-3.5 w-3.5 text-[#5D3A8C]" /> {t("meetings.external_attendees" as any)}
               </label>
               <input
                 className="input-field"
-                placeholder="jane@company.com, bob@agency.com (comma-separated)"
+                placeholder={td("jane@company.com, bob@agency.com (comma-separated)")}
                 value={schedEmails}
                 onChange={(e) => setSchedEmails(e.target.value)}
               />
               <p className="mt-1 text-xs text-gray-400">
-                External attendees get an email notification but must create a Yusi Discuss account to join.
+                {td("External attendees get an email notification but must create a Yusi Discuss account to join.")}
               </p>
             </div>
 
@@ -662,17 +746,16 @@ function MeetingHubInner() {
               className="btn-primary"
             >
               <CalendarClock className="h-4 w-4" />
-              {schedCreating ? "Scheduling…" : "Schedule Meeting & Send Invites"}
+              {schedCreating ? t("meetings.scheduling" as any) : t("meetings.schedule_send" as any)}
             </button>
           </div>
 
-          {/* Upcoming scheduled meetings */}
           <div className="card p-6">
             <h3 className="font-semibold text-gray-900 mb-4">
-              Upcoming Scheduled Meetings
+              {t("meetings.upcoming_scheduled" as any)}
             </h3>
             {scheduledMeetings.length === 0 ? (
-              <p className="text-center text-gray-400 py-8 text-sm">No scheduled meetings yet.</p>
+              <p className="text-center text-gray-400 py-8 text-sm">{t("meetings.no_scheduled" as any)}</p>
             ) : (
               <ul className="space-y-3">
                 {scheduledMeetings.map((m) => (
@@ -699,7 +782,7 @@ function MeetingHubInner() {
                     {(m.attendees.length > 0 || m.attendeeEmails.length > 0) && (
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Users className="h-3.5 w-3.5 text-gray-400 shrink-0" />
-                        <span className="text-xs text-gray-500 font-medium">Attendees:</span>
+                        <span className="text-xs text-gray-500 font-medium">{t("meetings.attendees_label" as any)}:</span>
                         {m.attendees.map((a) => (
                           <span key={a.id} className="rounded-full bg-[#F3EEF8] px-2 py-0.5 text-xs text-[#5D3A8C]">
                             {a.name || a.email}
@@ -721,10 +804,10 @@ function MeetingHubInner() {
                         onClick={() => copyLink(m.meetingLink, m.id)}
                       >
                         {copiedLink === m.id ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
-                        {copiedLink === m.id ? "Copied!" : "Copy Link"}
+                        {copiedLink === m.id ? t("ai.copied" as any) : t("chat.copy_link" as any)}
                       </button>
                       <Link href={`/dashboard/meetings/room/${m.roomCode}`} className="btn-primary text-xs py-1.5">
-                        <ExternalLink className="h-3 w-3" /> Open Room
+                        <ExternalLink className="h-3 w-3" /> {td("Open Room")}
                       </Link>
                     </div>
                   </li>

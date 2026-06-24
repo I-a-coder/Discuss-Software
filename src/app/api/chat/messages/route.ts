@@ -38,7 +38,7 @@ export async function GET(req: Request) {
   const messages = await prisma.chatMessage.findMany({
     where: { threadId },
     orderBy: { createdAt: "asc" },
-    take: 200,
+    take: 100,
     include: { author: { select: { name: true, email: true, id: true, image: true } } },
   });
 

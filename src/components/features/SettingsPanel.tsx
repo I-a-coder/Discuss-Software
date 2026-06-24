@@ -10,9 +10,10 @@ import { canPerform, getAccessibleFeatures } from "@/lib/permissions";
 import { Badge } from "@/components/ui/Badge";
 import { LanguageSwitcher } from "@/components/ui/LanguageSwitcher";
 import { useLabels } from "@/hooks/useLabels";
+import { useLanguage } from "@/contexts/LanguageContext";
 import {
   AlertTriangle, Bug, MessageSquareWarning, Lightbulb, CheckCircle,
-  Lock, Key, Shield, FileCheck,
+  Lock, Key, Shield, FileCheck, Calendar, RefreshCw, Unlink, ExternalLink, Pencil,
 } from "lucide-react";
 
 type Member = {
@@ -82,11 +83,12 @@ const MATRIX_ROWS = [
   { label: "Change Roles", perms: ["✓", "—", "—", "—"] },
 ];
 
-type Tab = "general" | "concern" | "security";
+type Tab = "general" | "concern" | "security" | "calendar";
 
 export function SettingsPanel() {
   const { data: session, update: updateSession } = useSession();
   const { t, role, feature } = useLabels();
+  const { td } = useLanguage();
   const userRole = (session?.user?.role || "GUEST") as UserRole;
   const features = getAccessibleFeatures(userRole);
   const canManageSoftware = canPerform(userRole, "manageTeam");
@@ -94,11 +96,11 @@ export function SettingsPanel() {
   const [activeTab, setActiveTab] = useState<Tab>("general");
   const searchParams = useSearchParams();
 
-  // Auto-open tab from ?tab= query param (used by redirects from /concerns and /security)
+  // Auto-open tab from ?tab= query param
   useEffect(() => {
     const tabParam = searchParams.get("tab");
-    if (tabParam === "concern" || tabParam === "security") {
-      setActiveTab(tabParam);
+    if (tabParam === "concern" || tabParam === "security" || tabParam === "calendar") {
+      setActiveTab(tabParam as Tab);
     }
   }, [searchParams]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -108,6 +110,60 @@ export function SettingsPanel() {
   const [message, setMessage] = useState<string | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const [profileNameDraft, setProfileNameDraft] = useState("");
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  useEffect(() => {
+    if (session?.user?.name && !profileNameDraft) {
+      setProfileNameDraft(session.user.name);
+    }
+  }, [session?.user?.name]);
+
+  // Calendar sync state
+  type CalendarStatus = { connected: boolean; tokenStatus: string | null };
+  const [calStatus, setCalStatus] = useState<{
+    google: CalendarStatus;
+    microsoft: CalendarStatus;
+  }>({ google: { connected: false, tokenStatus: null }, microsoft: { connected: false, tokenStatus: null } });
+  const [calLoading, setCalLoading] = useState(false);
+  const [calMessage, setCalMessage] = useState<string | null>(null);
+
+  // Show success/error banners from OAuth redirect query params
+  useEffect(() => {
+    const connected = searchParams.get("calendarConnected");
+    const err       = searchParams.get("calendarError");
+    if (connected) {
+      setCalMessage(`✓ ${connected === "google" ? "Google Calendar" : "Microsoft 365"} connected successfully!`);
+      setActiveTab("calendar");
+    } else if (err) {
+      setCalMessage(`⚠ Calendar connection failed: ${err.replace(/_/g, " ")}`);
+      setActiveTab("calendar");
+    }
+  }, [searchParams]);
+
+  // Load calendar connection status whenever the tab is active
+  useEffect(() => {
+    if (activeTab !== "calendar") return;
+    setCalLoading(true);
+    fetch("/api/calendar-sync/status")
+      .then((r) => r.json())
+      .then((d) => setCalStatus(d.connections))
+      .catch(() => {})
+      .finally(() => setCalLoading(false));
+  }, [activeTab]);
+
+  async function disconnectCalendar(provider: "google" | "microsoft") {
+    await fetch("/api/calendar-sync/disconnect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider }),
+    });
+    setCalStatus((prev) => ({
+      ...prev,
+      [provider]: { connected: false, tokenStatus: null },
+    }));
+    setCalMessage(`${provider === "google" ? "Google Calendar" : "Microsoft 365"} disconnected.`);
+  }
 
   // Concern state
   const isAuthority = canPerform(userRole, "viewConcerns");
@@ -189,6 +245,25 @@ export function SettingsPanel() {
     setMessage(t("settings.org_updated"));
   }
 
+  async function saveProfileName() {
+    if (!profileNameDraft.trim()) return;
+    setSavingProfile(true);
+    setMessage(null);
+    const res = await fetch("/api/profile/name", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: profileNameDraft }),
+    });
+    if (res.ok) {
+      const { user } = await res.json();
+      await updateSession({ name: user.name });
+      setMessage(td("Profile updated successfully"));
+    } else {
+      setMessage(td("Failed to update profile"));
+    }
+    setSavingProfile(false);
+  }
+
   async function saveOrganizationName() {
     if (!orgNameDraft.trim()) return;
     setSavingOrg(true);
@@ -237,9 +312,10 @@ export function SettingsPanel() {
   }
 
   const TABS: { id: Tab; label: string }[] = [
-    { id: "general", label: "General & Profile" },
-    { id: "concern", label: "Concern & Help" },
-    { id: "security", label: "Security" },
+    { id: "general",  label: "General & Profile" },
+    { id: "calendar", label: "Calendar Sync" },
+    { id: "concern",  label: "Concern & Help" },
+    ...(features.includes("encryption") ? [{ id: "security" as Tab, label: "Security" }] : []),
   ];
 
   return (
@@ -277,12 +353,22 @@ export function SettingsPanel() {
           <div className="card p-6">
             <h3 className="font-semibold text-gray-900">{t("settings.profile")}</h3>
             <div className="mt-4 flex items-center gap-4">
-              <UserAvatar
-                name={session?.user?.name}
-                email={session?.user?.email}
-                image={session?.user?.image}
-                size="lg"
-              />
+              <button
+                type="button"
+                className="relative group shrink-0 rounded-full overflow-hidden border border-transparent hover:border-[#5D3A8C]/20 transition"
+                onClick={() => avatarInputRef.current?.click()}
+                title="Edit profile photo"
+              >
+                <UserAvatar
+                  name={session?.user?.name}
+                  email={session?.user?.email}
+                  image={session?.user?.image}
+                  size="lg"
+                />
+                <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Pencil className="h-4 w-4 text-white" />
+                </div>
+              </button>
               <div className="flex flex-wrap gap-2">
                 <input
                   ref={avatarInputRef}
@@ -320,9 +406,24 @@ export function SettingsPanel() {
               </div>
             </div>
             <dl className="mt-4 space-y-2 text-sm">
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <dt className="text-gray-500">{t("settings.name")}</dt>
-                <dd>{session?.user?.name || "—"}</dd>
+                <dd className="flex items-center gap-2">
+                  <input
+                    className="input-field py-1 px-2 text-sm max-w-[200px]"
+                    value={profileNameDraft}
+                    onChange={(e) => setProfileNameDraft(e.target.value)}
+                    placeholder={td("Your name")}
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary py-1 px-3 text-xs"
+                    onClick={saveProfileName}
+                    disabled={savingProfile || profileNameDraft === session?.user?.name}
+                  >
+                    {td("Save")}
+                  </button>
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-gray-500">{t("auth.email")}</dt>
@@ -461,17 +562,6 @@ export function SettingsPanel() {
               </div>
             </>
           )}
-
-          <div className="card p-6">
-            <h3 className="font-semibold text-gray-900">{t("settings.ai_assistant_config")}</h3>
-            <p className="mt-2 text-sm text-gray-600">{t("settings.ai_desc")}</p>
-            <pre className="mt-3 rounded-lg bg-gray-50 p-3 text-xs text-gray-700 overflow-x-auto">
-{`AI_API_KEY=your-groq-or-openai-key
-AI_API_BASE_URL=https://api.groq.com/openai/v1
-AI_MODEL=llama-3.3-70b-versatile
-OPENAI_API_KEY=optional-for-whisper`}
-            </pre>
-          </div>
         </div>
       )}
 
@@ -480,13 +570,13 @@ OPENAI_API_KEY=optional-for-whisper`}
         <div className="space-y-6">
           {sent && (
             <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-800 flex items-center gap-2">
-              <CheckCircle className="h-5 w-5" /> Your report has been submitted. Thank you!
+              <CheckCircle className="h-5 w-5" /> {td("Your report has been submitted. Thank you!")}
             </p>
           )}
 
           <div className="grid gap-6 lg:grid-cols-2">
             <form onSubmit={submitConcern} className="card p-6 space-y-4">
-              <h3 className="font-semibold text-gray-900">Submit a Report or Request Help</h3>
+              <h3 className="font-semibold text-gray-900">{td("Submit a Report or Request Help")}</h3>
               <div className="grid grid-cols-2 gap-2">
                 {CONCERN_CATS.map((c) => {
                   const Icon = c.icon;
@@ -509,26 +599,26 @@ OPENAI_API_KEY=optional-for-whisper`}
               </div>
               <input
                 className="input-field"
-                placeholder="Subject"
+                placeholder={td("Subject")}
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 required
               />
               <textarea
                 className="input-field min-h-[140px]"
-                placeholder="Describe your issue or feedback in detail…"
+                placeholder={td("Describe your issue or feedback in detail…")}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 required
               />
               <button type="submit" className="btn-primary w-full">
-                Submit Report
+                {td("Submit Report")}
               </button>
             </form>
 
             <div className="card p-6">
               <h3 className="font-semibold text-gray-900 mb-4">
-                {isAuthority ? "All Reports" : "Your Submissions"}
+                {isAuthority ? td("All Reports") : td("Your Submissions")}
               </h3>
               <ul className="space-y-3 max-h-[480px] overflow-y-auto">
                 {reports.map((r) => (
@@ -540,7 +630,7 @@ OPENAI_API_KEY=optional-for-whisper`}
                           ? "bg-amber-100 text-amber-800"
                           : "bg-green-100 text-green-800"
                       }`}>
-                        {r.status === "open" ? "Open" : "Resolved"}
+                        {r.status === "open" ? td("Open") : td("Resolved")}
                       </span>
                     </div>
                     <p className="text-xs text-gray-500 mt-1 capitalize">
@@ -584,22 +674,22 @@ OPENAI_API_KEY=optional-for-whisper`}
           </div>
 
           <div className="card p-6 bg-[#F3EEF8]/50">
-            <h3 className="font-semibold text-[#5D3A8C]">Permission Matrix</h3>
+            <h3 className="font-semibold text-[#5D3A8C]">{td("Permission Matrix")}</h3>
             <div className="mt-4 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-left text-[#5D3A8C]">
-                    <th className="py-2 pr-4">Feature</th>
-                    <th className="py-2 px-2">Owner</th>
-                    <th className="py-2 px-2">Admin</th>
-                    <th className="py-2 px-2">Member</th>
-                    <th className="py-2 px-2">Guest</th>
+                    <th className="py-2 pr-4">{td("Feature")}</th>
+                    <th className="py-2 px-2">{td("Owner")}</th>
+                    <th className="py-2 px-2">{td("Admin")}</th>
+                    <th className="py-2 px-2">{td("Member")}</th>
+                    <th className="py-2 px-2">{td("Guest")}</th>
                   </tr>
                 </thead>
                 <tbody className="text-gray-700">
                   {MATRIX_ROWS.map((row) => (
                     <tr key={row.label} className="border-t border-gray-200">
-                      <td className="py-2 pr-4">{row.label}</td>
+                      <td className="py-2 pr-4">{td(row.label)}</td>
                       {row.perms.map((c, i) => (
                         <td key={i} className="py-2 px-2 text-center">{c}</td>
                       ))}
@@ -608,6 +698,70 @@ OPENAI_API_KEY=optional-for-whisper`}
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── CALENDAR SYNC TAB ── */}
+      {activeTab === "calendar" && (
+        <div className="space-y-6">
+          {/* Feedback banner */}
+          {calMessage && (
+            <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${
+              calMessage.startsWith("✓")
+                ? "border-green-200 bg-green-50 text-green-800"
+                : "border-amber-200 bg-amber-50 text-amber-800"
+            }`}>
+              {calMessage.startsWith("✓") ? <CheckCircle className="h-4 w-4 mt-0.5 shrink-0" /> : <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />}
+              <span>{calMessage}</span>
+            </div>
+          )}
+
+          <div className="card p-6">
+            <div className="flex items-center gap-3 mb-1">
+              <Calendar className="h-6 w-6 text-[#5D3A8C]" />
+              <h3 className="font-semibold text-gray-900 text-lg">{td("Calendar Sync")}</h3>
+            </div>
+            <p className="text-sm text-gray-500 mb-6">
+              {td("Connect your calendar so meetings you schedule in Discuss automatically appear on your calendar and attendees receive real calendar invites. No action needed from invitees.")}
+            </p>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {/* Google Calendar card */}
+              <CalendarProviderCard
+                loading={calLoading}
+                name="Google Calendar"
+                icon="https://www.gstatic.com/images/branding/product/1x/calendar_48dp.png"
+                status={calStatus.google}
+                onConnect={() => { window.location.href = "/api/calendar-sync/connect?provider=google"; }}
+                onDisconnect={() => disconnectCalendar("google")}
+                scopeNote="Requests: calendar.events (create / edit / cancel events)"
+              />
+
+              {/* Microsoft 365 / Outlook card */}
+              <CalendarProviderCard
+                loading={calLoading}
+                name="Microsoft 365 / Outlook"
+                icon="https://res.cdn.office.net/assets/mail/pwa/v3/olk_64.png"
+                status={calStatus.microsoft}
+                onConnect={() => { window.location.href = "/api/calendar-sync/connect?provider=microsoft"; }}
+                onDisconnect={() => disconnectCalendar("microsoft")}
+                scopeNote="Requests: Calendars.ReadWrite"
+              />
+            </div>
+          </div>
+
+          <div className="card p-6 bg-[#F3EEF8]/40 border-[#5D3A8C]/10">
+            <h4 className="font-semibold text-[#5D3A8C] mb-2">{td("How it works")}</h4>
+            <ul className="space-y-2 text-sm text-gray-600">
+              <li className="flex gap-2"><span className="text-[#5D3A8C] font-bold">1.</span> {td("Connect your calendar above (only you, the organizer, need to do this).")}</li>
+              <li className="flex gap-2"><span className="text-[#5D3A8C] font-bold">2.</span> {td("When you schedule a meeting in the Meetings → Schedule tab, a calendar event is automatically created on your calendar.")}</li>
+              <li className="flex gap-2"><span className="text-[#5D3A8C] font-bold">3.</span> {td("Attendees you add receive a native calendar invite at their email. They don't need a Yusi Discuss account.")}</li>
+              <li className="flex gap-2"><span className="text-[#5D3A8C] font-bold">4.</span> {td("If you edit or cancel the meeting, the calendar event is updated automatically.")}</li>
+            </ul>
+            <p className="mt-4 text-xs text-gray-400">
+              {td("Your OAuth tokens are encrypted server-side with AES-256-GCM and never shared. Reverse sync (calendar edits reflecting back into Discuss) is a planned future feature.")}
+            </p>
           </div>
         </div>
       )}
@@ -638,3 +792,150 @@ function SecurityCheck({
     </div>
   );
 }
+
+/**
+ * Inline SVG provider logos — never depend on external CDN availability.
+ */
+function ProviderIcon({ name }: { name: string; icon: string }) {
+  const isGoogle = name.toLowerCase().includes("google");
+
+  if (isGoogle) {
+    // Google Calendar: blue square with white "31"
+    return (
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1a73e8] text-white font-bold text-[11px] shrink-0 select-none shadow-sm">
+        31
+      </span>
+    );
+  }
+
+  // Microsoft: classic 4-square logo
+  return (
+    <svg viewBox="0 0 21 21" className="h-8 w-8 shrink-0" aria-label="Microsoft">
+      <rect x="1" y="1"  width="9" height="9" fill="#f25022" rx="0.5" />
+      <rect x="11" y="1" width="9" height="9" fill="#7fba00" rx="0.5" />
+      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" rx="0.5" />
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900" rx="0.5" />
+    </svg>
+  );
+}
+
+function CalendarProviderCard({
+  loading,
+  name,
+  icon,
+  status,
+  onConnect,
+  onDisconnect,
+  scopeNote,
+}: {
+  loading: boolean;
+  name: string;
+  icon: string;
+  status: { connected: boolean; tokenStatus: string | null };
+  onConnect: () => void;
+  onDisconnect: () => void;
+  scopeNote: string;
+}) {
+  const isRevoked = status.connected && status.tokenStatus === "revoked";
+
+  return (
+    <div className={`rounded-2xl border p-5 flex flex-col gap-4 transition ${
+      status.connected && !isRevoked
+        ? "border-green-200 bg-green-50/40"
+        : isRevoked
+          ? "border-amber-200 bg-amber-50/40"
+          : "border-gray-200 bg-white"
+    }`}>
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <ProviderIcon name={name} icon={icon} />
+        <div className="min-w-0">
+          <p className="font-semibold text-gray-900 text-sm">{name}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{scopeNote}</p>
+        </div>
+      </div>
+
+      {/* Revoked token warning */}
+      {isRevoked && (
+        <div className="flex items-start gap-2 rounded-xl bg-amber-100 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>
+            Your calendar access was revoked or expired.{" "}
+            <button
+              type="button"
+              onClick={onConnect}
+              className="font-semibold underline hover:no-underline"
+            >
+              Reconnect
+            </button>{" "}
+            to restore sync.
+          </span>
+        </div>
+      )}
+
+      {/* Status badge */}
+      {!loading && (
+        <div className={`flex items-center gap-1.5 text-xs font-medium ${
+          status.connected && !isRevoked
+            ? "text-green-700"
+            : isRevoked
+              ? "text-amber-700"
+              : "text-gray-400"
+        }`}>
+          <span className={`inline-block h-2 w-2 rounded-full ${
+            status.connected && !isRevoked
+              ? "bg-green-500"
+              : isRevoked
+                ? "bg-amber-400"
+                : "bg-gray-300"
+          }`} />
+          {status.connected && !isRevoked
+            ? "Connected"
+            : isRevoked
+              ? "Token expired"
+              : "Not connected"}
+        </div>
+      )}
+
+      {loading && (
+        <p className="text-xs text-gray-400 animate-pulse">Checking status…</p>
+      )}
+
+      {/* Actions */}
+      <div className="flex flex-wrap gap-2 mt-auto">
+        {status.connected ? (
+          <>
+            {isRevoked && (
+              <button
+                type="button"
+                onClick={onConnect}
+                className="btn-primary text-xs py-2 flex items-center gap-1.5"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Reconnect
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onDisconnect}
+              className="btn-secondary text-xs py-2 flex items-center gap-1.5 text-red-600 hover:text-red-700"
+            >
+              <Unlink className="h-3.5 w-3.5" />
+              Disconnect
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={onConnect}
+            className="btn-primary text-xs py-2 flex items-center gap-1.5"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Connect {name}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+

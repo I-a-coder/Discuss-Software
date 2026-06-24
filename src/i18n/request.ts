@@ -1,14 +1,11 @@
-import { getRequestConfig } from 'next-intl/server';
-import { notFound } from 'next/navigation';
+// This file is a stub. The app uses its own i18n system via LanguageContext + translations.ts.
+// next-intl is not installed; this placeholder prevents build errors if Next.js discovers the file.
 
-// Can be imported from a shared config
-const locales = ['en', 'es', 'fr', 'de', 'zh', 'ja', 'ar', 'hi', 'pt', 'ru', 'it'];
+import { notFound } from "next/navigation";
 
-export default getRequestConfig(async ({ locale }) => {
-  // Validate that the incoming `locale` parameter is valid
-  if (!locales.includes(locale as any)) notFound();
+const locales = ["en", "es", "fr", "de", "zh", "ja", "ar", "hi", "pt", "ru", "it"] as const;
+type Locale = (typeof locales)[number];
 
-  return {
-    messages: (await import(`./${locale}.json`)).default
-  };
-});
+export function validateLocale(locale: string): asserts locale is Locale {
+  if (!(locales as readonly string[]).includes(locale)) notFound();
+}

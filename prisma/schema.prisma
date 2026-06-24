@@ -35,12 +35,14 @@ model User {
   chatMessages  ChatMessage[]
   personalNotes PersonalNote[]
   activities    ActivityLog[]
-  assignedTasks Task[]    @relation("TaskAssignee")
+  taskAssignments TaskAssignee[]
   createdTasks  Task[]    @relation("TaskCreator")
-  meetingNotes  MeetingNote[]
-  calendarEvents CalendarEvent[]
-  concernReports ConcernReport[]
-  meetingReviews MeetingReview[]
+  meetingNotes         MeetingNote[]
+  calendarEvents       CalendarEvent[]
+  concernReports       ConcernReport[]
+  meetingReviews       MeetingReview[]
+  calendarConnections  UserCalendarConnection[]
+  deletedMeetings      DeletedMeeting[]
 }
 
 model Organization {
@@ -172,21 +174,30 @@ model MeetingReview {
 }
 
 model Task {
-  id             String     @id @default(cuid())
+  id             String        @id @default(cuid())
   title          String
   description    String?
-  status         TaskStatus @default(TODO)
-  color          String     @default("#FEF3C7")
+  status         TaskStatus    @default(TODO)
+  color          String        @default("#FEF3C7")
   dueAt          DateTime?
-  assigneeId     String?
-  assignee       User?      @relation("TaskAssignee", fields: [assigneeId], references: [id])
   creatorId      String
-  creator        User       @relation("TaskCreator", fields: [creatorId], references: [id])
+  creator        User          @relation("TaskCreator", fields: [creatorId], references: [id])
   organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
+  organization   Organization  @relation(fields: [organizationId], references: [id])
+  assignees      TaskAssignee[]
   comments       TaskComment[]
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model TaskAssignee {
+  id     String @id @default(cuid())
+  taskId String
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([taskId, userId])
 }
 
 model TaskComment {
@@ -225,6 +236,7 @@ model Meeting {
   createdAt      DateTime  @default(now())
   notes          MeetingNote[]
   reviews        MeetingReview[]
+  deletedBy      DeletedMeeting[]
 }
 
 model MeetingNote {
@@ -240,6 +252,38 @@ model MeetingNote {
   authorId   String
   author     User     @relation(fields: [authorId], references: [id])
   createdAt  DateTime @default(now())
+}
+
+// Stores one OAuth calendar connection per user per provider.
+// Tokens are encrypted server-side with ENCRYPTION_KEY (AES-256-GCM).
+model UserCalendarConnection {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider     String   // "google" | "microsoft"
+  accessToken  String   // encrypted
+  refreshToken String   // encrypted
+  expiresAt    DateTime
+  calendarId   String?  // e.g. "primary" for Google; null = default
+  tokenStatus  String   @default("ok") // "ok" | "revoked"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, provider])
+}
+
+// Tracks the external calendar event linked to a Discuss meeting.
+model CalendarEventSync {
+  id                 String   @id @default(cuid())
+  scheduledMeetingId String?
+  meetingId          String?
+  provider           String   // "google" | "microsoft"
+  externalEventId    String
+  organizerUserId    String
+  createdAt          DateTime @default(now())
+
+  @@unique([scheduledMeetingId, provider])
+  @@unique([meetingId, provider])
 }
 
 model WhiteboardSnapshot {
@@ -281,4 +325,25 @@ model ScheduledMeeting {
   attendeeEmails    String   @default("[]")
   notificationSent  Boolean  @default(false)
   createdAt         DateTime @default(now())
+}
+
+model TranslationCache {
+  id        String   @id @default(cuid())
+  lang      String
+  key       String
+  value     String
+  createdAt DateTime @default(now())
+
+  @@unique([lang, key])
+}
+
+model DeletedMeeting {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meetingId String
+  meeting   Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, meetingId])
 }

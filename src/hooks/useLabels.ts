@@ -12,7 +12,7 @@ export function useLabels() {
     lang,
     setLang,
     isRtl,
-    feature: (f: Feature) => tFeature(lang, f),
-    role: (r: UserRole | string) => tRole(lang, r),
+    feature: (f: Feature) => t(`feature.${f}` as any),
+    role: (r: UserRole | string) => t(`role.${r.toLowerCase()}` as any),
   };
 }

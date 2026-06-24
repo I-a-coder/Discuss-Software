@@ -37,7 +37,7 @@ const googleId = process.env.GOOGLE_CLIENT_ID?.trim() || "";
 const googleSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || "";
 
 export const authOptions: NextAuthOptions = {
-  session: { strategy: "jwt" },
+  session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60 }, // 30 days
   pages: {
     signIn: "/login",
     newUser: "/signup",
@@ -144,6 +144,7 @@ export const authOptions: NextAuthOptions = {
       if (trigger === "update") {
         if (session?.role) token.role = session.role;
         if (session?.image !== undefined) token.picture = session.image;
+        if (session?.name !== undefined) token.name = session.name;
       }
       return token;
     },
@@ -154,6 +155,7 @@ export const authOptions: NextAuthOptions = {
         session.user.organizationId = token.organizationId;
         session.user.organizationName = token.organizationName;
         session.user.image = token.picture ?? session.user.image;
+        if (token.name) session.user.name = token.name;
       }
       return session;
     },

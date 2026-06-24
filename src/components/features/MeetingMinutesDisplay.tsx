@@ -6,6 +6,7 @@ import {
   downloadWordFromMarkdown,
   downloadPdfViaPrint,
 } from "@/lib/export-minutes";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 function renderMarkdownBlock(md: string) {
   const lines = md.split("\n");
@@ -127,6 +128,8 @@ export function MeetingMinutesDisplay({
   title?: string;
   participants?: string[];
 }) {
+  const { td } = useLanguage();
+
   // Inject participants before rendering
   const enrichedMarkdown = injectParticipants(markdown, participants);
 
@@ -143,10 +146,10 @@ export function MeetingMinutesDisplay({
   return (
     <div className="card overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-[#F3EEF8]/40 px-5 py-4">
-        <h4 className="font-semibold text-[#5D3A8C]">Generated minutes</h4>
+        <h4 className="font-semibold text-[#5D3A8C]">{td("Generated minutes")}</h4>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={copyAll} className="minutes-export-btn">
-            <Copy className="h-3.5 w-3.5" /> Copy
+            <Copy className="h-3.5 w-3.5" /> {td("Copy")}
           </button>
           <button
             type="button"
@@ -155,21 +158,21 @@ export function MeetingMinutesDisplay({
             }
             className="minutes-export-btn"
           >
-            <FileText className="h-3.5 w-3.5" /> Notepad (.txt)
+            <FileText className="h-3.5 w-3.5" /> {td("Notepad (.txt)")}
           </button>
           <button
             type="button"
             onClick={() => downloadWordFromMarkdown(enrichedMarkdown, title)}
             className="minutes-export-btn"
           >
-            <FileType className="h-3.5 w-3.5" /> Word (.doc)
+            <FileType className="h-3.5 w-3.5" /> {td("Word (.doc)")}
           </button>
           <button
             type="button"
             onClick={() => downloadPdfViaPrint(enrichedMarkdown, title)}
             className="minutes-export-btn"
           >
-            <Download className="h-3.5 w-3.5" /> PDF (print)
+            <Download className="h-3.5 w-3.5" /> {td("PDF (print)")}
           </button>
         </div>
       </div>

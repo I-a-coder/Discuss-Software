@@ -142,6 +142,15 @@ export async function POST(req: Request, { params }: Params) {
     });
   }
 
+  // Authorization: only allow users from the same org to join.
+  // The meeting host is always allowed (handles direct/cross-org invites via link).
+  const isHost = userId === meeting.hostId;
+  const userOrgId = session!.user.organizationId;
+  const meetingOrgId = meeting.organizationId;
+  if (!isHost && meetingOrgId && userOrgId !== meetingOrgId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const perms = getPermissions(room, userId);
   const isAudioOnly = room.audioOnly ?? false;
 

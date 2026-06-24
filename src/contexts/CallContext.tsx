@@ -1,6 +1,6 @@
 "use client";
 
-import {
+import React, {
   createContext,
   useCallback,
   useContext,
@@ -15,6 +15,9 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import type { TranslationKey } from "@/lib/translations";
 import type { CallInvitation, CallType } from "@/lib/call-store";
 import { startCallRing, type RingKind } from "@/lib/call-ringtone";
+
+/** How long to wait before auto-cancelling with "No answer" (matches server RING_TIMEOUT_MS) */
+const RING_TIMEOUT_MS = 15_000;
 
 type CallContextValue = {
   ringUser: (
@@ -54,17 +57,22 @@ function roomPath(code: string, type: CallType) {
   return `/dashboard/meetings/room/${code}${mode}`;
 }
 
+/** Shared purple gradient for all call types — matches app theme */
+const CALL_GRADIENT = "linear-gradient(135deg,#1a0a2e 0%,#2d1454 60%,#5D3A8C 100%)";
+
 function OutgoingCallOverlay({
   outgoing,
   onCancel,
   onCopyLink,
   copied,
+  countdown,
   t,
 }: {
   outgoing: CallInvitation;
   onCancel: () => void;
   onCopyLink: () => void;
   copied: boolean;
+  countdown: number;
   t: (key: TranslationKey) => string;
 }) {
   useEffect(() => {
@@ -74,16 +82,14 @@ function OutgoingCallOverlay({
 
   const isMeet = outgoing.type === "meet";
   const isGroup = (outgoing.participantCount ?? 0) > 1;
+  // Use callerTitle if available (e.g. "Calling Sadia"), otherwise fall back
+  const displayTitle = outgoing.callerTitle || outgoing.title;
 
   return (
     <div className="fixed inset-0 z-[200] flex items-end justify-center p-6 pointer-events-none">
       <div
         className="pointer-events-auto w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden"
-        style={{
-          background: isMeet
-            ? "linear-gradient(135deg,#1a0a2e 0%,#2d1454 60%,#5D3A8C 100%)"
-            : "linear-gradient(135deg,#052e16 0%,#14532d 60%,#166534 100%)",
-        }}
+        style={{ background: CALL_GRADIENT }}
       >
         <div className="relative flex flex-col items-center pt-10 pb-6 px-6">
           <div className="relative mb-6">
@@ -96,10 +102,7 @@ function OutgoingCallOverlay({
               )}
             </div>
           </div>
-          <p className="text-sm font-medium text-white/70 uppercase tracking-widest mb-1">
-            {t("meeting.calling")}
-          </p>
-          <h3 className="text-xl font-bold text-white mb-1 text-center">{outgoing.title}</h3>
+          <h3 className="text-xl font-bold text-white mb-1 text-center">{displayTitle}</h3>
           <p className="text-sm text-white/60 flex items-center gap-1.5">
             {isMeet ? <Video className="h-3.5 w-3.5" /> : <Phone className="h-3.5 w-3.5" />}
             {isMeet ? t("discussion.meet") : t("meeting.audio_call")}
@@ -109,8 +112,8 @@ function OutgoingCallOverlay({
               </span>
             )}
           </p>
-          <p className="mt-3 text-xs text-white/50 text-center max-w-[220px]">
-            {t("call.waiting_in_room")}
+          <p className="mt-3 text-xs text-white/40 text-center">
+            {t("meeting.calling")} {countdown}s
           </p>
           <button
             onClick={onCopyLink}
@@ -154,21 +157,15 @@ function IncomingCallOverlay({
     <div className="fixed inset-0 z-[200] flex items-end justify-center p-6 pointer-events-none">
       <div
         className="pointer-events-auto w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden"
-        style={{
-          background: isMeet
-            ? "linear-gradient(135deg,#1a0a2e 0%,#2d1454 60%,#5D3A8C 100%)"
-            : "linear-gradient(135deg,#052e16 0%,#14532d 60%,#166534 100%)",
-        }}
+        style={{ background: CALL_GRADIENT }}
       >
         <div className="relative flex flex-col items-center pt-10 pb-8 px-6">
           <div
-            className={`mb-3 rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-widest ${
-              isMeet ? "bg-purple-500/30 text-purple-200" : "bg-green-500/30 text-green-200"
-            }`}
+            className="mb-3 rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-widest bg-purple-500/30 text-purple-200"
           >
             {isMeet
-              ? `📹 ${t("meeting.incoming")} — ${t("discussion.meet")}`
-              : `📞 ${t("meeting.incoming")} — ${t("meeting.audio_call")}`}
+              ? `📹 ${t("meeting.incoming")} · ${t("discussion.meet")}`
+              : `📞 ${t("meeting.incoming")} · ${t("meeting.audio_call")}`}
           </div>
           <div className="relative mb-6">
             <span className="absolute inset-[-16px] rounded-full border-2 animate-ping border-purple-400/30" />
@@ -193,9 +190,7 @@ function IncomingCallOverlay({
             <div className="flex flex-col items-center gap-2">
               <button
                 onClick={onAccept}
-                className={`relative flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 ${
-                  isMeet ? "bg-purple-500 hover:bg-purple-600" : "bg-green-500 hover:bg-green-600"
-                }`}
+                className="relative flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95 bg-[#5D3A8C] hover:bg-[#7B52AC]"
               >
                 {isMeet ? (
                   <Video className="h-6 w-6 text-white relative z-10" />
@@ -234,11 +229,23 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [outgoing, setOutgoing] = useState<CallInvitation | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [countdown, setCountdown] = useState(RING_TIMEOUT_MS / 1000);
   const prevStatus = useRef<string | null>(null);
+  const ringStartRef = useRef<number | null>(null);
+  /** Holds the stop function for the active outgoing ring tone */
+  const stopRingRef = useRef<(() => void) | null>(null);
+  /** Tracks whether we are currently in a ringing state for adaptive poll speed */
+  const isRingingRef = useRef(false);
 
   const clearOutgoing = useCallback(() => {
+    // Stop ring tone immediately
+    stopRingRef.current?.();
+    stopRingRef.current = null;
+    isRingingRef.current = false;
     setOutgoing(null);
     prevStatus.current = null;
+    ringStartRef.current = null;
+    setCountdown(RING_TIMEOUT_MS / 1000);
   }, []);
 
   const dismissIncoming = useCallback(async () => {
@@ -265,6 +272,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setIncoming(data.incoming ?? null);
 
       const og: CallInvitation | null = data.outgoing ?? null;
+
+      // Accepted: navigate caller into room
       if (og?.status === "accepted") {
         clearOutgoing();
         if (!pathname?.includes("/dashboard/meetings/room/")) {
@@ -272,30 +281,77 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         }
         return;
       }
+
+      // Declined: show toast
       if (og && prevStatus.current === "ringing" && og.status === "declined") {
         setToast(t("call.declined"));
         clearOutgoing();
         return;
       }
+
+      // Server marked as missed (15s timeout hit server-side)
+      if (og && prevStatus.current === "ringing" && og.status === "missed") {
+        setToast(t("call.no_answer"));
+        const roomCode = og.roomCode;
+        clearOutgoing();
+        // Discard unattended meeting from history
+        fetch("/api/calls/discard", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ roomCode }),
+        }).catch(() => {});
+        return;
+      }
+
+      // Call disappeared (cancelled / timed out)
       if (!og && prevStatus.current === "ringing") {
         clearOutgoing();
         return;
       }
+
       if (og) {
         setOutgoing(og);
+        if (!prevStatus.current) {
+          ringStartRef.current = Date.now();
+          isRingingRef.current = true;
+        }
         prevStatus.current = og.status ?? null;
+
+        // Client-side countdown
+        if (og.status === "ringing" && ringStartRef.current) {
+          const elapsed = Date.now() - ringStartRef.current;
+          const remaining = Math.max(0, Math.ceil((RING_TIMEOUT_MS - elapsed) / 1000));
+          setCountdown(remaining);
+
+          // Auto-cancel when countdown hits 0
+          if (elapsed >= RING_TIMEOUT_MS) {
+            setToast(t("call.no_answer"));
+            const roomCode = og.roomCode;
+            // Discard unattended meeting from history (fire-and-forget)
+            fetch("/api/calls/discard", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ roomCode }),
+            }).catch(() => {});
+            clearOutgoing();
+          }
+        }
       }
     } catch {
       /* skip */
     }
   }, [session?.user?.id, pathname, router, t, clearOutgoing]);
 
+  // Adaptive poll: 500ms while actively ringing (fast detect of accept/decline),
+  // 2000ms otherwise (saves bandwidth when idle)
   useEffect(() => {
     if (!session?.user?.id) return;
     poll();
-    const interval = setInterval(poll, 1500);
+    const interval = setInterval(() => {
+      poll();
+    }, isRingingRef.current ? 500 : 2000);
     return () => clearInterval(interval);
-  }, [poll, session?.user?.id]);
+  }, [poll, session?.user?.id, outgoing?.status]);
 
   const ringUser = useCallback(
     async (targetId: string, type: CallType, title?: string) => {
@@ -309,13 +365,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (data.call) {
         setOutgoing(data.call);
         prevStatus.current = "ringing";
+        ringStartRef.current = Date.now();
+        setCountdown(RING_TIMEOUT_MS / 1000);
       }
-      if (data.roomCode) {
-        router.push(roomPath(data.roomCode, type));
-      }
+      // Caller does NOT auto-navigate to room — waits for receiver to accept
       return data;
     },
-    [router]
+    []
   );
 
   const ringMeeting = useCallback(
@@ -341,43 +397,60 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (data.call) {
         setOutgoing(data.call);
         prevStatus.current = "ringing";
+        ringStartRef.current = Date.now();
+        setCountdown(RING_TIMEOUT_MS / 1000);
       }
-      router.push(roomPath(opts.roomCode, "meet"));
+      // Caller waits in overlay — enters room only when a participant accepts
       return data;
     },
-    [router]
+    []
   );
 
   async function acceptCall() {
     if (!incoming) return;
-    await fetch("/api/calls", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ callId: incoming.id, status: "accepted" }),
-    });
     const path = roomPath(incoming.roomCode, incoming.type);
-    await dismissIncoming();
+    const callId = incoming.id;
+    // MUST await PATCH before navigating — in-memory op is <50ms.
+    // If we navigate first, syncPresence fires dismissIncomingForUser which wipes
+    // the store entry before respondToCall can mark it "accepted" → caller sees "declined".
+    try {
+      await fetch("/api/calls", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ callId, status: "accepted" }),
+      });
+    } catch { /* proceed anyway */ }
+    setIncoming(null);
     router.push(path);
+    // PUT cleanup is non-critical — fire in background
+    fetch("/api/calls", { method: "PUT" }).catch(() => {});
   }
 
   async function declineCall() {
     if (!incoming) return;
-    await fetch("/api/calls", {
+    const callId = incoming.id;
+    setIncoming(null);
+    // Fire-and-forget
+    fetch("/api/calls", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ callId: incoming.id, status: "declined" }),
-    });
-    await dismissIncoming();
+      body: JSON.stringify({ callId, status: "declined" }),
+    }).catch(() => {});
+    fetch("/api/calls", { method: "PUT" }).catch(() => {});
   }
 
   async function cancelOutgoing() {
-    await fetch("/api/calls", { method: "DELETE" });
-    await fetch("/api/calls", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "dismiss_outgoing" }),
-    });
+    const roomCode = outgoing?.roomCode;
     clearOutgoing();
+    // Fire-and-forget: cancel call + discard unattended meeting from history
+    fetch("/api/calls", { method: "DELETE" }).catch(() => {});
+    if (roomCode) {
+      fetch("/api/calls/discard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomCode }),
+      }).catch(() => {});
+    }
   }
 
   async function copyMeetingLink() {
@@ -413,6 +486,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           onCancel={cancelOutgoing}
           onCopyLink={copyMeetingLink}
           copied={copied}
+          countdown={countdown}
           t={t}
         />
       )}

@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "prisma generate && next build",
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbopack",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
     "postinstall": "prisma generate",
@@ -14,11 +14,13 @@
   "dependencies": {
     "@prisma/client": "^6.9.0",
     "bcryptjs": "^3.0.2",
+    "googleapis": "^173.0.0",
     "lucide-react": "^0.511.0",
     "next": "^15.3.3",
     "next-auth": "^4.24.11",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "resend": "^6.13.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
@@ -29,6 +31,7 @@
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.5",
     "@types/uuid": "^10.0.0",
+    "cross-env": "^10.1.0",
     "eslint": "^9.27.0",
     "eslint-config-next": "^15.3.3",
     "prisma": "^6.9.0",
