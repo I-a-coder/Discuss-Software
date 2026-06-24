@@ -22,8 +22,11 @@ export type CallInvitation = {
   participantCount?: number;
 };
 
-const store = new Map<string, CallInvitation>();
-const callerStore = new Map<string, CallInvitation>();
+const store: Map<string, CallInvitation> = (globalThis as any)._callStore || new Map();
+if (!(globalThis as any)._callStore) (globalThis as any)._callStore = store;
+
+const callerStore: Map<string, CallInvitation> = (globalThis as any)._callerStore || new Map();
+if (!(globalThis as any)._callerStore) (globalThis as any)._callerStore = callerStore;
 
 /** 1:1 and group rings expire after 15 seconds with no answer. */
 export const RING_TIMEOUT_MS = 15_000;
